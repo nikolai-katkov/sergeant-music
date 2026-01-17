@@ -1,4 +1,4 @@
-# Audio Architecture
+****# Audio Architecture
 
 ## Overview
 
@@ -38,44 +38,27 @@ AudioTime for sample-accurate timing
 
 ## Audio Subsystem Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  Audio Subsystem                         │
-│                  (Audio Thread)                          │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         AudioEngineManager                        │  │
-│  │  - AVAudioEngine lifecycle                        │  │
-│  │  - Audio session configuration                    │  │
-│  │  - Node graph management                          │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │         EventSequencer                            │  │
-│  │  - Sample-accurate event scheduling              │  │
-│  │  - MusicalClock (tempo, beats, bars)             │  │
-│  │  - Quantization engine                            │  │
-│  │  - Loop region management                         │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │      BackingTrackEngine                           │  │
-│  │  - Coordinates all instruments                    │  │
-│  │  - Chord → notes conversion                       │  │
-│  └─────┬──────────────────────────┬─────────────────┘  │
-│        │                          │                      │
-│  ┌─────┴──────────┐      ┌───────┴──────────┐          │
-│  │  SamplePlayer  │      │ SynthesizerNode  │          │
-│  │  (Drums)       │      │ (Bass, Pads)     │          │
-│  └────────────────┘      └──────────────────┘          │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │    AudioThreadSafeQueue (Lock-Free)               │  │
-│  │  - Audio thread → Main thread events             │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-                    Main Thread
+```mermaid
+flowchart TB
+    subgraph Audio["Audio Subsystem (Audio Thread)"]
+        Mgr[AudioEngineManager<br/>AVAudioEngine lifecycle<br/>Audio session config<br/>Node graph management]
+
+        Seq[EventSequencer<br/>Sample-accurate scheduling<br/>MusicalClock tempo/beats/bars<br/>Quantization<br/>Loop management]
+
+        Back[BackingTrackEngine<br/>Coordinates instruments<br/>Chord → notes conversion]
+
+        Sample[SamplePlayer<br/>Drums]
+        Synth[SynthesizerNode<br/>Bass, Pads]
+
+        Queue[AudioThreadSafeQueue<br/>Lock-Free<br/>Audio → Main thread events]
+
+        Mgr --> Seq
+        Seq --> Back
+        Back --> Sample
+        Back --> Synth
+    end
+
+    Audio --> Main[Main Thread]
 ```
 
 ## Key Components

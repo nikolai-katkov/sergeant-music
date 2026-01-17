@@ -156,26 +156,18 @@ SwiftUI Re-renders
 
 ### Architecture Pattern
 
-```
-┌─────────────────────────────────────────┐
-│           SwiftUI Views                 │
-│  (PracticeView, FretboardView, etc.)   │
-└─────────────────┬───────────────────────┘
-                  │ Binding
-┌─────────────────┴───────────────────────┐
-│          ViewModels                     │
-│  @Published state, ObservableObject     │
-└─────────────────┬───────────────────────┘
-                  │ Delegates
-┌─────────────────┴───────────────────────┐
-│       PracticeCoordinator               │
-│  (Orchestrates Audio + MIDI + UI)      │
-└─────┬───────────────────────┬───────────┘
-      │                       │
-┌─────┴────────┐    ┌────────┴──────┐
-│ Audio        │    │ MIDI          │
-│ Subsystem    │    │ Subsystem     │
-└──────────────┘    └───────────────┘
+```mermaid
+flowchart TB
+    Views[SwiftUI Views<br/>PracticeView, FretboardView, etc.]
+    VMs[ViewModels<br/>@Published state, ObservableObject]
+    Coord[PracticeCoordinator<br/>Orchestrates Audio + MIDI + UI]
+    Audio[Audio Subsystem]
+    MIDI[MIDI Subsystem]
+
+    Views -->|Binding| VMs
+    VMs -->|Delegates| Coord
+    Coord --> Audio
+    Coord --> MIDI
 ```
 
 ### Key Patterns

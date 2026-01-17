@@ -31,37 +31,21 @@ SergeantMusic has unique state management challenges:
 
 ## State Flow Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Main Thread (UI)                       │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         SwiftUI Views                             │  │
-│  │  - Bind to ViewModel @Published properties       │  │
-│  │  - Trigger user actions                           │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │ Binding                              │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │         ViewModels (ObservableObject)            │  │
-│  │  @Published var isPlaying: Bool                  │  │
-│  │  @Published var currentBeat: Int                 │  │
-│  │  @Published var currentChord: Chord?             │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │ Delegate/Callback                    │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │       PracticeCoordinator                         │  │
-│  │  - Bridges audio + MIDI + UI                     │  │
-│  │  - Manages lock-free queue                        │  │
-│  │  - Dispatches to audio queue                      │  │
-│  └─────┬──────────────────────────┬─────────────────┘  │
-│        │                          │                      │
-└────────┼──────────────────────────┼──────────────────────┘
-         │                          │
-         ↓                          ↓
-┌────────┴──────────┐      ┌───────┴──────────┐
-│ Audio Subsystem   │      │ MIDI Subsystem   │
-│ (Audio Thread)    │      │ (MIDI Thread)    │
-└───────────────────┘      └──────────────────┘
+```mermaid
+flowchart TB
+    subgraph Main["Main Thread (UI)"]
+        Views[SwiftUI Views<br/>Bind to @Published<br/>Trigger user actions]
+
+        VMs[ViewModels<br/>ObservableObject<br/>@Published isPlaying<br/>@Published currentBeat<br/>@Published currentChord]
+
+        Coord[PracticeCoordinator<br/>Bridges audio + MIDI + UI<br/>Manages lock-free queue<br/>Dispatches to audio queue]
+
+        Views -->|Binding| VMs
+        VMs -->|Delegate/Callback| Coord
+    end
+
+    Coord --> Audio[Audio Subsystem<br/>Audio Thread]
+    Coord --> MIDI[MIDI Subsystem<br/>MIDI Thread]
 ```
 
 ## Core State Types

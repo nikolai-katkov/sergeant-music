@@ -28,73 +28,42 @@ SergeantMusic's MIDI subsystem enables hands-free practice control via foot peda
 
 ## MIDI Subsystem Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  MIDI Subsystem                          │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         MIDIManager                               │  │
-│  │  - Core MIDI client lifecycle                     │  │
-│  │  - Connection management                          │  │
-│  │  - Device state tracking                          │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │      MIDIDeviceScanner                            │  │
-│  │  - Bluetooth MIDI discovery                       │  │
-│  │  - USB MIDI enumeration                           │  │
-│  │  - Network MIDI browsing                          │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │      MIDIEventHandler                             │  │
-│  │  - Parse MIDI packets                             │  │
-│  │  - Timestamp events immediately                   │  │
-│  │  - Route to audio queue                           │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │      MIDICommandMapper                            │  │
-│  │  - Map MIDI messages → app commands              │  │
-│  │  - User-configurable mappings                     │  │
-│  │  - Command validation                             │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│  ┌────────────────┴─────────────────────────────────┐  │
-│  │      MIDIDeviceConfig                             │  │
-│  │  - Store user mappings                            │  │
-│  │  - Device-specific presets                        │  │
-│  │  - Persistence (JSON)                             │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-                    Audio Queue
-                           ↓
-                    EventSequencer
+```mermaid
+flowchart TB
+    subgraph MIDI["MIDI Subsystem"]
+        Mgr[MIDIManager<br/>Core MIDI client lifecycle<br/>Connection management<br/>Device state tracking]
+
+        Scanner[MIDIDeviceScanner<br/>Bluetooth MIDI discovery<br/>USB MIDI enumeration<br/>Network MIDI browsing]
+
+        Handler[MIDIEventHandler<br/>Parse MIDI packets<br/>Timestamp events immediately<br/>Route to audio queue]
+
+        Mapper[MIDICommandMapper<br/>Map MIDI → app commands<br/>User-configurable mappings<br/>Command validation]
+
+        Config[MIDIDeviceConfig<br/>Store user mappings<br/>Device-specific presets<br/>Persistence JSON]
+
+        Mgr --> Scanner
+        Scanner --> Handler
+        Handler --> Mapper
+        Mapper --> Config
+    end
+
+    MIDI --> Audio[Audio Queue]
+    Audio --> Seq[EventSequencer]
 ```
 
 ## MIDI Event Flow
 
-```
-MIDI Device (Foot Pedal)
-    ↓ (Bluetooth/USB/Network)
-Core MIDI Callback
-    ↓ (MIDIPacket)
-MIDIEventHandler.handlePacket()
-    ↓ (parse bytes, timestamp)
-audioQueue.async { ... }
-    ↓ (audio thread)
-MIDICommandMapper.map()
-    ↓ (MIDI → App Command)
-EventSequencer.scheduleQuantized()
-    ↓ (calculate next grid point)
-Schedule Event at Quantized Time
-    ↓ (audio render callback)
-Execute Command (e.g., change chord)
-    ↓ (lock-free queue)
-Notify Main Thread
-    ↓ (UI updates)
-Update All Visualizations
+```mermaid
+flowchart TD
+    A[MIDI Device<br/>Foot Pedal] -->|Bluetooth/USB/Network| B[Core MIDI Callback<br/>MIDIPacket]
+    B --> C[MIDIEventHandler.handlePacket<br/>parse bytes, timestamp]
+    C -->|audioQueue.async| D[Audio Thread]
+    D --> E[MIDICommandMapper.map<br/>MIDI → App Command]
+    E --> F[EventSequencer.scheduleQuantized<br/>calculate next grid point]
+    F --> G[Schedule Event at Quantized Time]
+    G -->|audio render callback| H[Execute Command<br/>e.g., change chord]
+    H -->|lock-free queue| I[Notify Main Thread]
+    I --> J[Update All Visualizations]
 ```
 
 **Timing:** Total latency from pedal press to audio change: < 5ms jitter

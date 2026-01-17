@@ -27,37 +27,30 @@ SergeantMusic provides real-time visualization of exercises across four differen
 
 ## Visualization Subsystem Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│               Visualization Subsystem                    │
-│                   (Main Thread)                          │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │         PlaybackCursor (Shared)                   │  │
-│  │  - Sample time → Screen position                  │  │
-│  │  - Lookahead calculations                         │  │
-│  │  - Beat → Pixel conversion                        │  │
-│  └────────────────┬─────────────────────────────────┘  │
-│                   │                                      │
-│       ┌───────────┴───────────┬──────────────┬────────┐│
-│       │                       │              │        ││
-│  ┌────┴────────┐  ┌──────────┴──┐  ┌────────┴───┐  ┌┴┴
-│  │ Fretboard   │  │  Notation   │  │    TAB     │  │Ti│
-│  │ Renderer    │  │  Renderer   │  │  Renderer  │  │Re│
-│  └─────────────┘  └─────────────┘  └────────────┘  └──┘
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │     View-Specific ViewModels                      │  │
-│  │  - FretboardViewModel                             │  │
-│  │  - NotationViewModel                              │  │
-│  │  - TABViewModel                                   │  │
-│  │  - TimelineViewModel                              │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-                           ↑
-                 PlaybackState Events
-                           │
-                 PracticeCoordinator
+```mermaid
+flowchart TB
+    subgraph Viz["Visualization Subsystem (Main Thread)"]
+        Cursor[PlaybackCursor Shared<br/>Sample time → Screen position<br/>Lookahead calculations<br/>Beat → Pixel conversion]
+
+        Fret[Fretboard<br/>Renderer]
+        Notation[Notation<br/>Renderer]
+        TAB[TAB<br/>Renderer]
+        Timeline[Timeline<br/>Renderer]
+
+        subgraph VMs["View-Specific ViewModels"]
+            FVM[FretboardViewModel]
+            NVM[NotationViewModel]
+            TVM[TABViewModel]
+            TimeVM[TimelineViewModel]
+        end
+
+        Cursor --> Fret
+        Cursor --> Notation
+        Cursor --> TAB
+        Cursor --> Timeline
+    end
+
+    Coord[PracticeCoordinator] -->|PlaybackState Events| Viz
 ```
 
 ## Core Visualization Pattern

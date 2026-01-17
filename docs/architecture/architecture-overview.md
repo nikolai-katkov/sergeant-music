@@ -6,35 +6,32 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 
 ### High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        UI Layer (SwiftUI)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   Practice   │  │  Fretboard   │  │  Notation    │      │
-│  │   View       │  │   View       │  │   View       │ ...  │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-┌──────────────────────────────┴──────────────────────────────┐
-│                     ViewModels (MVVM)                        │
-│              @Published state, UI logic                      │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-┌──────────────────────────────┴──────────────────────────────┐
-│              Services / Coordination Layer                   │
-│                  PracticeCoordinator                         │
-│      (Bridges Audio, MIDI, and UI subsystems)               │
-└───────────┬──────────────────────────────┬──────────────────┘
-            │                              │
-┌───────────┴───────────┐      ┌──────────┴───────────┐
-│   Audio Subsystem     │      │   MIDI Subsystem     │
-│   (Audio Thread)      │      │   (MIDI Thread)      │
-│                       │      │                      │
-│ • EventSequencer      │      │ • MIDIManager        │
-│ • BackingTrackEngine  │      │ • MIDIEventHandler   │
-│ • MusicalClock        │      │ • MIDICommandMapper  │
-│ • AudioEngineManager  │      │                      │
-└───────────────────────┘      └──────────────────────┘
+```mermaid
+flowchart TB
+    subgraph UI["UI Layer (SwiftUI)"]
+        Views["PracticeView | FretboardView | NotationView | ..."]
+    end
+
+    subgraph VM["ViewModels (MVVM)"]
+        State["@Published state, UI logic"]
+    end
+
+    subgraph Services["Services / Coordination Layer"]
+        Coord["PracticeCoordinator<br/>(Bridges Audio, MIDI, UI)"]
+    end
+
+    subgraph Audio["Audio Subsystem (Audio Thread)"]
+        AudioComps["EventSequencer<br/>BackingTrackEngine<br/>MusicalClock<br/>AudioEngineManager"]
+    end
+
+    subgraph MIDI["MIDI Subsystem (MIDI Thread)"]
+        MIDIComps["MIDIManager<br/>MIDIEventHandler<br/>MIDICommandMapper"]
+    end
+
+    UI --> VM
+    VM --> Services
+    Services --> Audio
+    Services --> MIDI
 ```
 
 ## Layer Responsibilities
@@ -219,44 +216,36 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 ### Thread Communication Patterns
 
 #### Audio → Main Thread (State Updates)
-```
-Audio Render Callback
-    ↓ (lock-free enqueue)
-AudioThreadSafeQueue
-    ↓ (60 Hz polling)
-Main Thread Timer
-    ↓ (process events)
-ViewModel @Published updates
-    ↓
-SwiftUI re-renders
+
+```mermaid
+flowchart TD
+    A[Audio Render Callback] -->|lock-free enqueue| B[AudioThreadSafeQueue]
+    B -->|60 Hz polling| C[Main Thread Timer]
+    C -->|process events| D[ViewModel @Published updates]
+    D --> E[SwiftUI re-renders]
 ```
 
 **Implementation:** Lock-free ring buffer with atomic operations
 
 #### Main Thread → Audio Thread (Commands)
-```
-User Action (e.g., play button)
-    ↓
-ViewModel method
-    ↓
-PracticeCoordinator
-    ↓ (DispatchQueue audioQueue.async)
-Audio Thread
-    ↓
-Audio engine updates
+
+```mermaid
+flowchart TD
+    A[User Action<br/>e.g., play button] --> B[ViewModel method]
+    B --> C[PracticeCoordinator]
+    C -->|audioQueue.async| D[Audio Thread]
+    D --> E[Audio engine updates]
 ```
 
 **Implementation:** Serial DispatchQueue with QoS .userInteractive
 
 #### MIDI Thread → Audio Thread (Events)
-```
-MIDI Device
-    ↓ (Core MIDI callback)
-MIDIEventHandler
-    ↓ (parse + timestamp)
-audioQueue.async
-    ↓
-EventSequencer.scheduleQuantized()
+
+```mermaid
+flowchart TD
+    A[MIDI Device] -->|Core MIDI callback| B[MIDIEventHandler]
+    B -->|parse + timestamp| C[audioQueue.async]
+    C --> D[EventSequencer.scheduleQuantized]
 ```
 
 **Implementation:** Immediate dispatch to audio queue
@@ -265,86 +254,39 @@ EventSequencer.scheduleQuantized()
 
 ### Practice Session Flow
 
-```
-1. User selects exercise
-   ExerciseLibraryView → ExerciseLibraryViewModel
-
-2. Load exercise data
-   ExerciseService.load() → Exercise model
-   ├─→ If pattern-based: PatternGenerator.generate()
-   │   ├─→ ScaleEngine.notes(key, scale)
-   │   ├─→ PositionMapper.mapToFretboard()
-   │   └─→ SequenceBuilder.buildSequences()
-   └─→ If explicit: Parse note/chord data directly
-
-3. Initialize audio engine
-   PracticeCoordinator.startSession(exercise)
-   ├─→ AudioEngineManager.configure()
-   └─→ BackingTrackEngine.loadExercise()
-
-4. User presses play
-   PracticeView → PracticeViewModel → PracticeCoordinator
-   ├─→ audioQueue.async { sequencer.start() }
-   └─→ isPlaying = true
-
-5. Audio engine plays
-   EventSequencer (audio thread)
-   ├─→ Schedules chord changes
-   ├─→ Triggers backing track notes
-   └─→ Enqueues beat events → lock-free queue
-
-6. UI updates
-   Main thread timer (60 Hz)
-   ├─→ Dequeues audio events
-   ├─→ Updates ViewModel @Published properties
-   └─→ SwiftUI refreshes views
-
-7. Visualization syncs
-   PlaybackCursor receives position
-   ├─→ FretboardRenderer highlights notes
-   ├─→ NotationRenderer moves cursor
-   ├─→ TABRenderer highlights frets
-   └─→ TimelineRenderer highlights chords
+```mermaid
+flowchart TD
+    A[User selects exercise] --> B[Load exercise data<br/>ExerciseService]
+    B --> C{Exercise type?}
+    C -->|Pattern-based| D[PatternGenerator<br/>ScaleEngine → PositionMapper<br/>→ SequenceBuilder]
+    C -->|Explicit| E[Parse note/chord<br/>data directly]
+    D --> F[Initialize audio engine<br/>PracticeCoordinator]
+    E --> F
+    F --> G[AudioEngineManager.configure<br/>BackingTrackEngine.loadExercise]
+    G --> H[User presses play]
+    H --> I[sequencer.start on audio thread<br/>isPlaying = true]
+    I --> J[Audio engine plays<br/>EventSequencer schedules events]
+    J --> K[Events → lock-free queue]
+    K --> L[Main thread timer 60Hz<br/>dequeues events]
+    L --> M[Update ViewModel @Published]
+    M --> N[SwiftUI refreshes all views<br/>Fretboard | Notation | TAB | Timeline]
 ```
 
 ### MIDI Control Flow
 
-```
-1. User connects MIDI device
-   MIDIManager.startScanning()
-   └─→ Discovers devices
-
-2. User selects device
-   SettingsView → MIDIManager.connect(device)
-
-3. MIDI device sends message (e.g., foot pedal press)
-   Core MIDI callback
-   └─→ MIDIEventHandler.handlePacket()
-
-4. Parse and route
-   MIDIEventHandler
-   ├─→ Parse MIDI bytes
-   ├─→ Timestamp event
-   └─→ audioQueue.async { ... }
-
-5. Map to command
-   MIDICommandMapper (audio thread)
-   └─→ "Note On Ch1" → "Next Chord"
-
-6. Quantize and schedule
-   EventSequencer
-   ├─→ Calculate next grid point
-   └─→ Schedule chord change event
-
-7. Execute at precise time
-   Audio render callback
-   ├─→ Check scheduled events
-   ├─→ Execute chord change
-   └─→ Notify UI via lock-free queue
-
-8. UI updates
-   Main thread receives event
-   └─→ All visualizations update
+```mermaid
+flowchart TD
+    A[User connects MIDI device] --> B[MIDIManager.startScanning<br/>discovers devices]
+    B --> C[User selects device<br/>MIDIManager.connect]
+    C --> D[MIDI device sends message<br/>e.g., foot pedal press]
+    D --> E[Core MIDI callback<br/>MIDIEventHandler.handlePacket]
+    E --> F[Parse MIDI bytes<br/>timestamp event]
+    F --> G[audioQueue.async dispatch]
+    G --> H[MIDICommandMapper<br/>Note On Ch1 → Next Chord]
+    H --> I[EventSequencer<br/>calculate next grid point<br/>schedule chord change]
+    I --> J[Audio render callback<br/>execute chord change at precise time]
+    J --> K[Notify UI via lock-free queue]
+    K --> L[Main thread receives event<br/>all visualizations update]
 ```
 
 ## Key Design Decisions
