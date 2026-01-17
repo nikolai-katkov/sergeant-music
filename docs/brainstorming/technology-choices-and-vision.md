@@ -58,9 +58,9 @@ An iOS app for interactive guitar learning featuring:
 - **Display Modes (all supported):**
   - Standard notation (treble clef)
   - Guitar tablature (TAB)
-  - Chord diagrams/charts
-  - Timeline/block visualization
-- **Interactivity:** User-switchable layouts per exercise
+  - Fretboard view for played notes, chord diagrams and theory overlay
+  - Chord timeline/block visualization
+- **Interactivity:** User-switchable layouts per exercise (switchability is configured per exercise)
 
 ### Data Storage
 - **Primary:** Local file storage (JSON)
@@ -106,9 +106,11 @@ An iOS app for interactive guitar learning featuring:
    - Difficulty progression
 
 ### Deferred to Post-MVP
-- Audio input analysis (pitch detection)
+- Audio input analysis (pitch detection, auto-pause-resume, correctness evaluation, gamification)
+- Video input analysis (guitar fretboard tracking, finger placement analysis)
 - Music theory lesson modules
 - Full notation editor
+- Official method - learning path
 - Exercise sharing/export
 - Advanced groove customization
 

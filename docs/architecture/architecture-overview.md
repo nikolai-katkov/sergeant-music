@@ -51,10 +51,15 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 **Key Components:**
 - `PracticeView`: Main practice session interface
 - `FretboardView`: Animated fretboard with Canvas
+  - Displays played notes in real-time
+  - Shows chord diagrams
+  - Theory overlay with intervals/scale degrees
 - `NotationView`: Sheet music with scrolling cursor
 - `TABView`: Guitar tablature display
 - `TimelineView`: Chord block timeline
 - `ExerciseLibraryView`: Exercise selection
+
+**Note:** View switchability is configured per exercise (some exercises may restrict certain views)
 
 **Threading:** Main thread only
 
@@ -151,7 +156,27 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 
 **Threading:** Main thread (SwiftUI Canvas)
 
-### 7. Core Layer
+### 7. Pattern Generation Subsystem
+**Technology:** Swift algorithms
+
+**Responsibilities:**
+- Algorithmic exercise generation from patterns
+- Scale and chord generation in any key
+- Fretboard position mapping with constraints
+- Sequence building (inversions, directions, rhythms)
+
+**Key Components:**
+- `PatternGenerator`: Orchestrates pattern-to-notes conversion
+- `ScaleEngine`: Generates scale notes for any key/scale type
+- `PositionMapper`: Maps notes to fretboard with fingering rules
+- `SequenceBuilder`: Creates note sequences (inversions, directions)
+- `PatternDefinition.swift`: Pattern data model
+
+**Threading:** Can run on background thread for complex patterns
+
+**Note:** Most exercises are pattern-based, enabling random key practice and infinite variations from single pattern definitions.
+
+### 8. Core Layer
 **Technology:** Swift structs and classes
 
 **Responsibilities:**
@@ -161,7 +186,7 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 
 **Key Components:**
 - `MusicalConcepts.swift`: Note, Chord, Scale, Interval
-- `Exercise.swift`: Exercise data model
+- `Exercise.swift`: Exercise data model (supports both pattern and explicit types)
 - `MIDIMapping.swift`: MIDI device configuration
 - `TimeConversion.swift`: Musical time ↔ samples
 
@@ -246,6 +271,11 @@ EventSequencer.scheduleQuantized()
 
 2. Load exercise data
    ExerciseService.load() → Exercise model
+   ├─→ If pattern-based: PatternGenerator.generate()
+   │   ├─→ ScaleEngine.notes(key, scale)
+   │   ├─→ PositionMapper.mapToFretboard()
+   │   └─→ SequenceBuilder.buildSequences()
+   └─→ If explicit: Parse note/chord data directly
 
 3. Initialize audio engine
    PracticeCoordinator.startSession(exercise)
@@ -384,6 +414,11 @@ SergeantMusic/
 │   └── AppCoordinator.swift
 ├── Core/
 │   ├── Models/
+│   ├── PatternGeneration/
+│   │   ├── PatternGenerator.swift
+│   │   ├── ScaleEngine.swift
+│   │   ├── PositionMapper.swift
+│   │   └── SequenceBuilder.swift
 │   ├── Extensions/
 │   └── Utilities/
 ├── Audio/
@@ -403,6 +438,13 @@ SergeantMusic/
 ├── Rendering/
 └── Resources/
     ├── Exercises/ (JSON)
+    │   ├── patterns/
+    │   │   ├── scales/
+    │   │   ├── arpeggios/
+    │   │   └── intervals/
+    │   └── explicit/
+    │       ├── songs/
+    │       └── chord-progressions/
     ├── Samples/ (audio)
     └── Assets.xcassets
 ```
@@ -427,10 +469,11 @@ SergeantMusic/
 
 1. Implement Audio subsystem (AudioEngineManager, EventSequencer)
 2. Implement lock-free queue (AudioThreadSafeQueue)
-3. Implement PracticeCoordinator (bridge layer)
-4. Build basic UI with PracticeView
-5. Add MIDI support incrementally
-6. Iterate on visualization system
+3. Implement Pattern Generation subsystem (PatternGenerator, ScaleEngine, PositionMapper)
+4. Implement PracticeCoordinator (bridge layer)
+5. Build basic UI with PracticeView
+6. Add MIDI support incrementally
+7. Iterate on visualization system
 
 ---
 
@@ -440,3 +483,5 @@ SergeantMusic/
 - [MIDI Architecture](midi-architecture.md)
 - [Visualization Architecture](visualization-architecture.md)
 - [State Management](state-management.md)
+- [Exercise JSON Schema](../exercise-json-schema.md)
+- [ADR-011: Algorithmic Pattern Generator](../adr/ADR-011-algorithmic-pattern-generator.md)
