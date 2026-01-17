@@ -9,7 +9,10 @@ SergeantMusic is built using a layered architecture that separates concerns betw
 ```mermaid
 flowchart TB
     subgraph UI["UI Layer (SwiftUI)"]
-        Views["PracticeView | FretboardView | NotationView | ..."]
+        PracticeV[PracticeView]
+        FretboardV[FretboardView]
+        NotationV[NotationView]
+        OtherV[...]
     end
 
     subgraph VM["ViewModels (MVVM)"]
@@ -269,7 +272,11 @@ flowchart TD
     J --> K[Events → lock-free queue]
     K --> L[Main thread timer 60Hz<br/>dequeues events]
     L --> M[Update ViewModel @Published]
-    M --> N[SwiftUI refreshes all views<br/>Fretboard | Notation | TAB | Timeline]
+    M --> N1[SwiftUI refreshes all views]
+    N1 --> N2[FretboardView]
+    N1 --> N3[NotationView]
+    N1 --> N4[TABView]
+    N1 --> N5[TimelineView]
 ```
 
 ### MIDI Control Flow
