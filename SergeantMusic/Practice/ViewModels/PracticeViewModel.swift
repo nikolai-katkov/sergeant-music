@@ -25,8 +25,16 @@ class PracticeViewModel: ObservableObject {
     @Published var tempo: Double = 120.0 {
         didSet {
             // Clamp to valid range
-            tempo = max(40, min(240, tempo))
-            coordinator.setTempo(tempo)
+            let clampedTempo = max(40, min(240, tempo))
+            if clampedTempo != tempo {
+                tempo = clampedTempo
+            }
+            // Update coordinator tempo asynchronously to avoid recursion
+            Task {
+                await MainActor.run {
+                    coordinator.setTempo(tempo)
+                }
+            }
         }
     }
 

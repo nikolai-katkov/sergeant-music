@@ -72,17 +72,21 @@ class PracticeCoordinator: ObservableObject {
 
     private func setupAudioEngine() {
         do {
-            // Configure audio session
+            print("🎵 Configuring audio session...")
             try sessionManager.configureForPractice()
+            print("✅ Audio session configured")
 
-            // Attach metronome to engine
+            print("🎵 Attaching metronome to engine...")
             try engineManager.attachMetronome(metronome)
+            print("✅ Metronome attached")
 
-            // Initialize engine
+            print("🎵 Initializing audio engine...")
             try engineManager.initialize()
+            print("✅ Audio engine initialized")
 
         } catch {
-            print("Failed to setup audio engine: \(error)")
+            print("❌ Failed to setup audio engine: \(error)")
+            print("   Error details: \(error.localizedDescription)")
         }
     }
 
@@ -100,31 +104,37 @@ class PracticeCoordinator: ObservableObject {
 
     /// Start playback
     func start() {
+        print("▶️ Start playback requested")
         audioQueue.async { [weak self] in
             guard let self = self else { return }
 
             do {
-                // Start audio engine
+                print("🎵 Starting audio engine...")
                 try self.engineManager.start()
+                print("✅ Audio engine started")
 
-                // Start metronome player
+                print("🎵 Starting metronome player...")
                 self.metronome.start()
+                print("✅ Metronome player started")
 
                 // Reset scheduling
                 self.lastScheduledBeat = 0.0
                 self.musicalClock.reset()
 
-                // Schedule initial clicks
+                print("🎵 Scheduling initial metronome clicks...")
                 self.scheduleMetronomeClicks()
+                print("✅ Initial clicks scheduled")
 
                 // Update UI state
                 Task { @MainActor in
                     self.isPlaying = true
                     self.startUpdateTimer()
+                    print("✅ Playback started successfully")
                 }
 
             } catch {
-                print("Failed to start playback: \(error)")
+                print("❌ Failed to start playback: \(error)")
+                print("   Error details: \(error.localizedDescription)")
             }
         }
     }
@@ -175,6 +185,7 @@ class PracticeCoordinator: ObservableObject {
     /// Set tempo
     /// - Parameter bpm: Tempo in beats per minute
     func setTempo(_ bpm: Double) {
+        print("🎼 Setting tempo to \(Int(bpm)) BPM")
         audioQueue.async { [weak self] in
             self?.musicalClock.tempo = bpm
         }
