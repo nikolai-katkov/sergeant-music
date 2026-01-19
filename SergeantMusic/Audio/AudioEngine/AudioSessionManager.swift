@@ -44,6 +44,8 @@ class AudioSessionManager {
     /// Configure audio session for practice mode (low latency)
     /// - Throws: Audio session configuration errors
     func configureForPractice() throws {
+        // Use playback category which plays even in silent mode
+        // This is appropriate for a music practice app
         try session.setCategory(.playback, mode: .default, options: [])
 
         // Set preferred buffer size for low latency

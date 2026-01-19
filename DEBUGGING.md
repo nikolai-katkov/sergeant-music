@@ -1,227 +1,175 @@
 # Debugging Guide - Week 1 Audio Issues
 
-## Changes Made
+## Current Status: ✅ FIXED - Production Ready
 
-### 1. Fixed Slider Crash (PracticeViewModel)
-**Problem**: Slider was causing crashes due to synchronous calls in `didSet`
-**Fix**: Made tempo updates asynchronous and fixed clamping logic
+### Final Solution: hostTime Scheduling with Absolute Time
 
+**Root Cause**: AVAudioEngine scheduling requires precise timing anchored to wall-clock time using `mach_absolute_time()`.
+
+**Solution**:
+1. Capture `mach_absolute_time()` when playback starts
+2. Calculate each beat's absolute time from playback start
+3. Convert to host time ticks using `mach_timebase_info`
+4. Create `AVAudioTime(hostTime:)` for scheduling
+
+**Key Implementation** ([PracticeCoordinator.swift:215-246](SergeantMusic/Services/PracticeCoordinator.swift#L215-L246)):
 ```swift
-@Published var tempo: Double = 120.0 {
-    didSet {
-        let clampedTempo = max(40, min(240, tempo))
-        if clampedTempo != tempo {
-            tempo = clampedTempo
-        }
-        Task {
-            await MainActor.run {
-                coordinator.setTempo(tempo)
-            }
-        }
+// At playback start
+self.schedulingStartHostTime = mach_absolute_time()
+
+// For each beat
+private func scheduleMetronomeClicks() {
+    let secondsPerBeat = 60.0 / musicalClock.tempo
+
+    var timebase = mach_timebase_info_data_t()
+    mach_timebase_info(&timebase)
+    let toNanos = Double(timebase.numer) / Double(timebase.denom)
+
+    for i in 0..<Int(lookaheadBeats) {
+        let beat = currentBeat + Double(i)
+        let absoluteOffsetSeconds = 0.1 + (beat * secondsPerBeat)
+        let offsetNanos = absoluteOffsetSeconds * 1_000_000_000.0
+        let offsetTicks = UInt64(offsetNanos / toNanos)
+        let scheduledHostTime = schedulingStartHostTime + offsetTicks
+
+        let audioTime = AVAudioTime(hostTime: scheduledHostTime)
+        let isAccent = Int(beat) % musicalClock.timeSignature.beatsPerBar == 0
+        metronome.scheduleClick(at: audioTime, isAccent: isAccent)
     }
 }
 ```
 
-### 2. Added Comprehensive Logging
-Added emoji-based logging throughout the audio pipeline to help diagnose issues:
-- 🎵 = Operation starting
-- ✅ = Success
-- ❌ = Failure/Error
-- ▶️ = Playback control
-- 🎼 = Tempo change
+**Critical Details**:
+- Uses **absolute time from playback start**, not relative to "now"
+- Schedules 4 beats ahead with lookahead
+- Reschedules every 2 beats for continuous playback
+- HIGH pitch (1200Hz) on downbeat, LOW pitch (800Hz) on other beats
 
-## How to Debug
+### Tempo Changes During Playback
 
-### Step 1: Check Console Output
+**Solution** ([PracticeCoordinator.swift:184-211](SergeantMusic/Services/PracticeCoordinator.swift#L184-L211)):
+```swift
+func setTempo(_ bpm: Double) {
+    musicalClock.tempo = bpm
 
-Run the app in Xcode and watch the console. You should see:
+    if isPlaying {
+        // Stop player to clear scheduled buffers
+        metronome.stop()
 
-```
-🎵 Configuring audio session...
-✅ Audio session configured
-🎵 Attaching metronome to engine...
-✅ Metronome attached
-🎵 Initializing audio engine...
-✅ Audio engine initialized
-```
+        // Calculate current beat position
+        let elapsed = Date().timeIntervalSince(playbackStartTime)
+        let oldSecondsPerBeat = 60.0 / musicalClock.tempo
+        let currentBeat = elapsed / oldSecondsPerBeat
 
-### Step 2: Test Play Button
+        // Reset timing anchors
+        lastScheduledBeat = floor(currentBeat)
+        playbackStartTime = Date()
+        schedulingStartHostTime = mach_absolute_time()
 
-Press the play button and look for:
-
-```
-▶️ Start playback requested
-🎵 Starting audio engine...
-✅ Audio engine started
-🎵 Starting metronome player...
-✅ Metronome player started
-🎵 Scheduling initial metronome clicks...
-✅ Initial clicks scheduled
-✅ Playback started successfully
+        // Restart with new tempo
+        metronome.start()
+        scheduleMetronomeClicks()
+    }
+}
 ```
 
-### Step 3: Test Slider
+### Sample Rate Matching
 
-Move the tempo slider and look for:
+**Critical Fix** ([AudioEngineManager.swift:47-62](SergeantMusic/Audio/AudioEngine/AudioEngineManager.swift#L47-L62)):
+- Use actual system sample rate (typically 48kHz on real devices)
+- Don't hardcode 44.1kHz
+- Get from `engine.outputNode.outputFormat(forBus: 0).sampleRate`
 
-```
-🎼 Setting tempo to 150 BPM
-```
+---
+
+## Previous Issues (Resolved)
+
+### 1. Fixed Slider Crash (PracticeViewModel)
+**Problem**: Slider was causing crashes due to synchronous calls in `didSet`
+**Fix**: Made tempo updates asynchronous
+
+---
+
+## Testing Checklist
+
+### ✅ Verified Working
+- [x] Metronome plays on every beat (not once per bar)
+- [x] HIGH pitch (1200Hz) on downbeat, LOW pitch (800Hz) on other beats
+- [x] Correct timing at 120 BPM (0.5s between beeps)
+- [x] Tempo changes work smoothly during playback
+- [x] Audio continues in background
+- [x] No crashes or audio glitches
+- [x] Works on real iPhone device
+
+### Production Deployment Checklist
+- [x] All debug logging removed (except critical errors)
+- [x] Diagnostic taps removed
+- [x] Sample rate properly detected from system
+- [x] Audio session configured for background playback
+- [x] Interruption handling (phone calls, etc.)
+
+---
 
 ## Common Issues & Solutions
 
 ### Issue 1: No Sound
 
 **Symptoms**: App runs but no audio
-**Possible causes**:
-1. Simulator audio routing issues
-2. System volume muted
-3. Audio session not configured
-4. AVAudioEngine not starting
-
 **Solutions**:
-- **Test on real device** (simulator audio is unreliable)
-- Check system volume
-- Check console for error messages starting with ❌
-- Verify you see "✅ Audio engine started"
+- Test on **real device** (simulator audio is unreliable)
+- Check device volume and silent mode switch
+- Verify Info.plist has audio background mode enabled
+- Check for "❌ Failed to start playback" in console
 
-### Issue 2: App Crashes on Launch
+### Issue 2: Timing Drift
 
-**Symptoms**: App crashes immediately
-**Possible causes**:
-1. PracticeCoordinator init failing
-2. Audio format issues
-3. Missing audio permissions
-
+**Symptoms**: Metronome drifts out of sync over time
 **Solutions**:
-- Check console for "❌ Failed to setup audio engine"
-- Look for the specific error message
-- Verify Info.plist has audio background mode configured
+- Ensure using `mach_absolute_time()` for scheduling anchor
+- Verify calculating absolute time from playback start, not relative
+- Check system sample rate matches audio format
 
-### Issue 3: Slider Crashes App
+### Issue 3: Audio Interruptions
 
-**Symptoms**: App crashes when moving tempo slider
-**Status**: ✅ **FIXED** in this update
+**Symptoms**: Audio stops on phone calls or other interruptions
+**Solutions**:
+- Check `setupInterruptionHandling()` is called in init
+- Verify audio session category is `.playback`
+- System will automatically pause; can resume after interruption ends
 
-**What was wrong**: The `didSet` was recursively setting tempo and calling coordinator synchronously
+---
 
-### Issue 4: Audio Permissions
+## Architecture Notes
 
-**iOS requires audio permissions for background audio**
+### Why hostTime Instead of sampleTime?
 
-Check your Info.plist has:
-```xml
-<key>UIBackgroundModes</key>
-<array>
-    <string>audio</string>
-</array>
-```
+Initially attempted using `AVAudioTime(sampleTime:atRate:)`, but discovered:
+- Engine's `lastRenderTime` is unreliable immediately after start
+- `playerNode.lastRenderTime` returns nil when not rendering
+- hostTime provides wall-clock accuracy needed for metronome
 
-And in Xcode target settings:
-- Signing & Capabilities → Background Modes → ✅ Audio, AirPlay, and Picture in Picture
+### Critical Timing Pattern
 
-## Testing Checklist
-
-- [ ] App launches without crash
-- [ ] Console shows successful audio setup (✅ messages)
-- [ ] Play button shows without crashing
-- [ ] Tempo slider moves without crashing
-- [ ] Tempo value updates on screen
-- [ ] Bar:Beat display shows 1:1
-- [ ] Press play button
-- [ ] Console shows playback started
-- [ ] **On real device**: Hear metronome clicks
-- [ ] Move slider while playing
-- [ ] Press pause button
-
-## Next Steps Based on Console Output
-
-### If you see ❌ errors:
-
-1. **"Audio session configuration failed"**
-   - Check device is not in silent mode
-   - Check no other audio app is hogging the session
-   - Try restarting device
-
-2. **"Failed to attach metronome"**
-   - Audio engine initialization issue
-   - Check audio format compatibility
-
-3. **"Failed to start audio engine"**
-   - Session not active
-   - Engine already running
-   - Hardware access denied
-
-### If no errors but no sound:
-
-1. **Test on real iPhone/iPad** (not simulator)
-2. Check device volume buttons
-3. Check device is not in silent mode (check switch on side)
-4. Try plugging in headphones
-5. Check Control Center audio routing
-
-## Simulator vs Device
-
-**Note**: The iOS Simulator has known audio issues:
-- Clicks may not play or be delayed
-- Sample rates might not match
-- Buffer underruns more common
-- Latency measurements meaningless
-
-**Always test audio on a real device!**
-
-## Console Debugging Commands
-
-If you want more detailed logging, add these to relevant files:
-
+**DO**:
 ```swift
-// In AudioEngineManager.swift
-print("🔊 Audio format: \(audioFormat)")
-print("🔊 Sample rate: \(audioFormat.sampleRate)")
-print("🔊 Channel count: \(audioFormat.channelCount)")
-
-// In MetronomeNode.swift
-print("🔊 Click buffer allocated: \(buffer.frameLength) frames")
-
-// In MusicalClock.swift
-print("⏱️ Samples per beat: \(samplesPerBeat)")
+let startHost = mach_absolute_time()  // Anchor
+let absoluteTime = 0.1 + (beat * secondsPerBeat)
+let scheduledHost = startHost + convertToTicks(absoluteTime)
 ```
 
-## Expected Normal Flow
+**DON'T**:
+```swift
+let now = mach_absolute_time()  // Changes every call!
+let relativeTime = 0.1 + (beat * secondsPerBeat)
+let scheduledHost = now + convertToTicks(relativeTime)  // Wrong!
+```
 
-1. App Launch:
-   - Audio session configured ✅
-   - Metronome attached ✅
-   - Engine initialized ✅
+---
 
-2. Press Play:
-   - Start playback requested ▶️
-   - Engine started ✅
-   - Metronome started ✅
-   - Clicks scheduled ✅
-   - Playback running ✅
+## If Still Having Issues
 
-3. Move Slider:
-   - Tempo change logged 🎼
-   - No crashes
-   - Audio continues
-
-4. Hear clicks:
-   - High pitch on beat 1 (downbeat)
-   - Lower pitch on beats 2, 3, 4
-
-## If Still No Sound After All This
-
-The most likely issue is **simulator audio**. Try:
-
-1. Close simulator
-2. Quit Xcode
-3. Restart Mac
-4. Open project
-5. Run on **real iPhone/iPad**
-
-You should hear clicks if:
-- Device volume is up
-- Not in silent mode
-- Background audio capability is enabled
-- No other app has exclusive audio access
+1. Check Xcode console for "❌ Failed" messages
+2. Verify on real device (not simulator)
+3. Ensure Info.plist has background audio mode
+4. Check device is not in Low Power Mode
+5. Try restarting the device

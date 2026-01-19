@@ -57,8 +57,8 @@ class PracticeCoordinator: ObservableObject {
     /// Track when playback actually started
     private var playbackStartTime: Date?
 
-    /// Track starting beat position
-    private var playbackStartBeat: Double = 0.0
+    /// Track when scheduling started (host time)
+    private var schedulingStartHostTime: UInt64 = 0
 
     // MARK: - Initialization
 
@@ -78,21 +78,11 @@ class PracticeCoordinator: ObservableObject {
 
     private func setupAudioEngine() {
         do {
-            print("🎵 Configuring audio session...")
             try sessionManager.configureForPractice()
-            print("✅ Audio session configured")
-
-            print("🎵 Attaching metronome to engine...")
             try engineManager.attachMetronome(metronome)
-            print("✅ Metronome attached")
-
-            print("🎵 Initializing audio engine...")
             try engineManager.initialize()
-            print("✅ Audio engine initialized")
-
         } catch {
             print("❌ Failed to setup audio engine: \(error)")
-            print("   Error details: \(error.localizedDescription)")
         }
     }
 
@@ -110,7 +100,6 @@ class PracticeCoordinator: ObservableObject {
 
     /// Start playback
     func start() {
-        print("▶️ Start playback requested")
         audioQueue.async { [weak self] in
             guard let self = self else { return }
 
@@ -120,34 +109,29 @@ class PracticeCoordinator: ObservableObject {
                     self.engineManager.stop()
                 }
 
-                print("🎵 Starting audio engine...")
                 try self.engineManager.start()
-                print("✅ Audio engine started")
-
-                print("🎵 Starting metronome player...")
                 self.metronome.start()
-                print("✅ Metronome player started")
 
                 // Reset scheduling - start from beat 0
                 self.lastScheduledBeat = 0.0
                 self.musicalClock.reset()
                 self.playbackStartTime = Date()
-                self.playbackStartBeat = 0.0
+                self.schedulingStartHostTime = mach_absolute_time()
 
-                print("🎵 Scheduling initial metronome clicks...")
+                // Give the engine a moment to stabilize before scheduling
+                // This ensures lastRenderTime is valid
+                usleep(10000)  // 10ms delay
+
                 self.scheduleMetronomeClicks()
-                print("✅ Initial clicks scheduled")
 
                 // Update UI state
                 Task { @MainActor in
                     self.isPlaying = true
                     self.startUpdateTimer()
-                    print("✅ Playback started successfully")
                 }
 
             } catch {
                 print("❌ Failed to start playback: \(error)")
-                print("   Error details: \(error.localizedDescription)")
             }
         }
     }
@@ -198,58 +182,76 @@ class PracticeCoordinator: ObservableObject {
     /// Set tempo
     /// - Parameter bpm: Tempo in beats per minute
     func setTempo(_ bpm: Double) {
-        print("🎼 Setting tempo to \(Int(bpm)) BPM")
         audioQueue.async { [weak self] in
-            self?.musicalClock.tempo = bpm
+            guard let self = self else { return }
+
+            self.musicalClock.tempo = bpm
+
+            // If playing, we need to reschedule with new tempo
+            if self.isPlaying {
+                // Stop the player node to clear scheduled buffers
+                self.metronome.stop()
+
+                // Reset scheduling to current beat
+                guard let startTime = self.playbackStartTime else { return }
+                let elapsed = Date().timeIntervalSince(startTime)
+                let oldSecondsPerBeat = 60.0 / self.musicalClock.tempo
+                let currentBeat = elapsed / oldSecondsPerBeat
+
+                // Reset timing anchors
+                self.lastScheduledBeat = floor(currentBeat)
+                self.playbackStartTime = Date()
+                self.schedulingStartHostTime = mach_absolute_time()
+
+                // Restart player and reschedule
+                self.metronome.start()
+                self.scheduleMetronomeClicks()
+            }
         }
     }
 
     // MARK: - Metronome Scheduling
 
     private func scheduleMetronomeClicks() {
-        guard let currentTime = engineManager.currentTime() else {
-            print("⚠️ No current time from engine")
-            return
-        }
-
-        let hostTime = currentTime.hostTime
-
-        // For initial scheduling, start from beat 0 or continue from last
         let currentBeat = self.lastScheduledBeat
-        let nextBeat = max(currentBeat, 0.0)
-
-        print("🎵 Scheduling clicks: current=\(String(format: "%.2f", currentBeat)), next=\(String(format: "%.2f", nextBeat))")
-
-        // Calculate time interval per beat in seconds
         let secondsPerBeat = 60.0 / musicalClock.tempo
 
-        // Add small initial offset if this is first scheduling
-        let initialOffset = (nextBeat == 0) ? 0.1 : 0.0  // 100ms delay for first click
+        // Get time base for conversion
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let toNanos = Double(timebase.numer) / Double(timebase.denom)
 
-        // Schedule lookahead beats
         for i in 0..<Int(lookaheadBeats) {
-            let beat = nextBeat + Double(i)
-            let secondsFromNow = initialOffset + (Double(i) * secondsPerBeat)
+            let beat = currentBeat + Double(i)
 
-            // Convert seconds to host time (nanoseconds on iOS)
-            let hostTimeOffset = UInt64(secondsFromNow * Double(NSEC_PER_SEC))
-            let scheduledHostTime = hostTime + hostTimeOffset
+            // Calculate absolute time since playback started
+            // Beat 0 should play at +0.1s, Beat 1 at +0.6s, Beat 2 at +1.1s, etc.
+            let absoluteOffsetSeconds = 0.1 + (beat * secondsPerBeat)
+
+            // Convert to host time from the start
+            let offsetNanos = absoluteOffsetSeconds * 1_000_000_000.0
+            let offsetTicks = UInt64(offsetNanos / toNanos)
+            let scheduledHostTime = schedulingStartHostTime + offsetTicks
 
             let audioTime = AVAudioTime(hostTime: scheduledHostTime)
-
-            // Check if this is an accent (downbeat)
             let isAccent = Int(beat) % musicalClock.timeSignature.beatsPerBar == 0
 
-            print("   🔔 Click scheduled at beat \(Int(beat)) (accent: \(isAccent), in \(String(format: "%.2f", secondsFromNow))s)")
             metronome.scheduleClick(at: audioTime, isAccent: isAccent)
         }
 
-        lastScheduledBeat = nextBeat + lookaheadBeats
-        print("✅ Scheduled \(Int(lookaheadBeats)) clicks, lastScheduled=\(String(format: "%.2f", lastScheduledBeat))")
+        lastScheduledBeat = currentBeat + lookaheadBeats
 
-        // Schedule next batch after these play (for continuous playback)
-        if nextBeat < 100 {  // Limit to 100 beats for Week 1 demo
-            let scheduleNextDelay = secondsPerBeat * Double(lookaheadBeats) * 0.75  // Schedule next batch at 75% through current batch
+        // Schedule next batch
+        scheduleNextBatch()
+    }
+
+    private func scheduleNextBatch() {
+        // Schedule next batch to trigger when we're halfway through current batch
+        if lastScheduledBeat < 100 {  // Limit to 100 beats for Week 1 demo
+            let samplesPerBeat = musicalClock.samplesPerBeat
+            let sampleRate = musicalClock.sampleRate
+            let scheduleNextDelay = (2.0 * samplesPerBeat) / sampleRate  // Re-schedule after 2 beats
+
             audioQueue.asyncAfter(deadline: .now() + scheduleNextDelay) { [weak self] in
                 self?.scheduleMetronomeClicks()
             }
@@ -279,7 +281,7 @@ class PracticeCoordinator: ObservableObject {
         let elapsed = Date().timeIntervalSince(startTime)
         let secondsPerBeat = 60.0 / musicalClock.tempo
         let elapsedBeats = elapsed / secondsPerBeat
-        let currentBeat = playbackStartBeat + elapsedBeats
+        let currentBeat = elapsedBeats  // Start from beat 0
 
         // Calculate bar and beat within bar
         let bar = Int(currentBeat) / musicalClock.timeSignature.beatsPerBar

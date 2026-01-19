@@ -641,6 +641,82 @@ class AudioPerformanceMonitor {
 **Detection:** Audio glitches under UI load
 **Fix:** Use lock-free queue, never share locks
 
+## Week 1 Implementation Learnings
+
+### hostTime vs sampleTime for Scheduling
+
+**Discovery:** For metronome-style click scheduling, `AVAudioTime(hostTime:)` is more reliable than `AVAudioTime(sampleTime:atRate:)`.
+
+**Why hostTime Works Better:**
+- Engine's `lastRenderTime` is unreliable immediately after start
+- `playerNode.lastRenderTime` returns nil when not actively rendering
+- hostTime provides wall-clock accuracy which is ideal for metronome use cases
+- Absolute timing from playback start anchor prevents drift
+
+**Implementation Pattern (Week 1 Metronome):**
+```swift
+// At playback start
+self.schedulingStartHostTime = mach_absolute_time()
+
+// For each beat
+let absoluteOffsetSeconds = 0.1 + (beat * secondsPerBeat)
+let offsetNanos = absoluteOffsetSeconds * 1_000_000_000.0
+let offsetTicks = UInt64(offsetNanos / toNanos)
+let scheduledHostTime = schedulingStartHostTime + offsetTicks
+
+let audioTime = AVAudioTime(hostTime: scheduledHostTime)
+metronome.scheduleClick(at: audioTime, isAccent: isAccent)
+```
+
+**Key Insight:** Use **absolute time from playback start**, not relative to "now". Recalculating from `mach_absolute_time()` on each scheduling call causes overlaps.
+
+**When to Use Each:**
+- **hostTime:** Metronome-style clicks, simple scheduling, wall-clock accuracy
+- **sampleTime:** Complex sequencing with tight sync to audio render callback (Week 2+)
+
+### Sample Rate Detection
+
+**Critical:** Don't hardcode 44.1kHz. iOS devices often run at 48kHz.
+
+```swift
+let outputFormat = engine.outputNode.outputFormat(forBus: 0)
+let actualSampleRate = outputFormat.sampleRate  // Use this!
+```
+
+Hardcoding causes timing errors and unnecessary resampling overhead.
+
+### Tempo Changes During Playback
+
+**Pattern:** Stop player node, recalculate position, reset anchors, restart.
+
+```swift
+func setTempo(_ bpm: Double) {
+    metronome.stop()  // Clear scheduled buffers
+
+    // Calculate current position
+    let elapsed = Date().timeIntervalSince(playbackStartTime)
+    let currentBeat = elapsed / oldSecondsPerBeat
+
+    // Reset timing anchors
+    lastScheduledBeat = floor(currentBeat)
+    playbackStartTime = Date()
+    schedulingStartHostTime = mach_absolute_time()
+
+    // Restart with new tempo
+    metronome.start()
+    scheduleMetronomeClicks()
+}
+```
+
+### Audio Session Configuration
+
+**Working Configuration:**
+- Category: `.playback` (plays even in silent mode)
+- Buffer: 256 samples (5.8ms latency at 44.1kHz)
+- Background modes: Audio enabled in Info.plist
+
+**For Week 2+:** May need to revisit for more complex backing tracks, but Week 1 proves the foundation works.
+
 ## Next Steps
 
 1. Implement AudioEngineManager

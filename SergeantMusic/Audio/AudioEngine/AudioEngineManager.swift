@@ -31,6 +31,11 @@ class AudioEngineManager {
     /// Is the engine currently running?
     private(set) var isRunning: Bool = false
 
+    /// Output node (convenience accessor)
+    var outputNode: AVAudioOutputNode {
+        return engine.outputNode
+    }
+
     // MARK: - Initialization
 
     /// Create audio engine manager
@@ -39,14 +44,16 @@ class AudioEngineManager {
         self.engine = AVAudioEngine()
         self.mainMixerNode = engine.mainMixerNode
 
-        // Get output format (typically 44.1kHz stereo)
-        let outputFormat = engine.outputNode.inputFormat(forBus: 0)
+        // Get the actual output format from the system
+        let outputFormat = engine.outputNode.outputFormat(forBus: 0)
+        let actualSampleRate = outputFormat.sampleRate
 
-        // Create standard format: 44.1kHz, stereo, float32
+        // Use the system's actual sample rate instead of forcing 44.1kHz
+        // This ensures proper timing and avoids resampling
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: 44100.0,
-            channels: 2,
+            sampleRate: actualSampleRate,
+            channels: outputFormat.channelCount,
             interleaved: false
         ) else {
             throw AudioEngineError.bufferAllocationFailed
@@ -60,6 +67,12 @@ class AudioEngineManager {
     /// Initialize the audio engine
     /// - Throws: Audio engine errors
     func initialize() throws {
+        // Set mixer volume to maximum
+        mainMixerNode.outputVolume = 1.0
+
+        // NOTE: mainMixerNode is already connected to outputNode by AVAudioEngine
+        // Do NOT manually connect it again as that can cause issues
+
         // Prepare the engine
         engine.prepare()
     }

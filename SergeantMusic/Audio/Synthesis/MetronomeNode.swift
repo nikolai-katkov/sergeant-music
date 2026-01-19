@@ -69,11 +69,11 @@ class MetronomeNode {
 
     /// Schedule a click at a specific time
     /// - Parameters:
-    ///   - time: AVAudioTime when click should play
+    ///   - time: AVAudioTime when click should play (nil means ASAP)
     ///   - isAccent: Whether this is an accented click (downbeat)
-    func scheduleClick(at time: AVAudioTime, isAccent: Bool) {
+    func scheduleClick(at time: AVAudioTime?, isAccent: Bool) {
         let buffer = isAccent ? accentBuffer : regularBuffer
-        playerNode.scheduleBuffer(buffer, at: time, options: [], completionHandler: nil)
+        playerNode.scheduleBuffer(buffer, at: time, options: [])
     }
 
     /// Schedule multiple clicks
